@@ -1,131 +1,118 @@
-// fakeBadges.js — client-side badge injector for Pyoncord / Bunny / Kettu forks.
-// finds the real UserStore by matching on getUsers + getCurrentUser (both),
-// which only the store has — the connection helper also has getCurrentUser
-// but not getUsers.
+(function (h, B, y, f, e, E, V, C) {
+  "use strict";
 
-const FAKE_FLAGS =
-    (1 << 0)  |  // Discord Staff
-    (1 << 1)  |  // Partnered Server Owner
-    (1 << 2)  |  // HypeSquad Events
-    (1 << 3)  |  // Bug Hunter
-    (1 << 9)  |  // Early Supporter
-    (1 << 14) |  // Bug Hunter Gold
-    (1 << 17) |  // Early Verified Bot Developer
-    (1 << 22);   // Active Developer
+  // ── badge set — hash → CDN asset ──
+  const CDN = "https://cdn.discordapp.com/badge-icons/";
+  const BADGES = [
+    { key: "staff",      setting: "showStaff",      hash: "5e74e9b61934fc1f67c65515d1f7e60d", label: "Discord Staff" },
+    { key: "partner",    setting: "showPartner",    hash: "3f9748e53446a137a052f3454e2de41e", label: "Partnered Server Owner" },
+    { key: "hsevents",   setting: "showHSEvents",   hash: "bf01d1073931f921909045f3a39fd264", label: "HypeSquad Events" },
+    { key: "bughunter",  setting: "showBugHunter",  hash: "2717692c7dca7289b35297368a940dd0", label: "Bug Hunter" },
+    { key: "bravery",    setting: "showBravery",    hash: "8a88d63823d8a71cd5e390baa45efa02", label: "HypeSquad Bravery" },
+    { key: "brilliance", setting: "showBrilliance", hash: "011940fd013da3f7fb926e4a1cd2e618", label: "HypeSquad Brilliance" },
+    { key: "balance",    setting: "showBalance",    hash: "3aa41de486fa12454c3761e8e223442e", label: "HypeSquad Balance" },
+    { key: "early",      setting: "showEarly",      hash: "7060786766c9c840eb3019e725d2b358", label: "Early Supporter" },
+    { key: "buggold",    setting: "showBugGold",    hash: "848f79194d4be5ff5f81505cbd0ce1e6", label: "Bug Hunter Gold" },
+    { key: "evbot",      setting: "showEVBot",      hash: "6df5892e0f35b051f8b61eace34f4967", label: "Early Verified Bot Developer" },
+    { key: "modalumni",  setting: "showModAlumni",  hash: "fee1624003e2fee35cb398e125dc479b", label: "Moderator Programs Alumni" },
+    { key: "actdev",     setting: "showActDev",     hash: "6bdc42827a38498929a4920da12695d9", label: "Active Developer" },
+  ];
 
-const FAKE_PREMIUM = 2;
-const STRIP_REAL = true;
+  const registry = {};                              // id → {id, source, label}
+  const R = window.bunny.api.react.jsx;
+  const useBadges = B.findByName("useBadges", false);
+  let patchReturn;
 
-let _originalGetCurrentUser = null;
-let _originalGetUser = null;
-let _UserStoreProto = null;
+  const { ScrollView } = f.General;
+  const { FormRow, FormSection, FormSwitchRow } = f.Forms;
 
-function fakeUser(u) {
-    if (!u) return u;
-    const base = STRIP_REAL ? 0 : (u.flags || 0);
-    return Object.assign({}, u, {
-        flags:       base | FAKE_FLAGS,
-        publicFlags: base | FAKE_FLAGS,
-        premium:     FAKE_PREMIUM,
-        premiumType: FAKE_PREMIUM,
-    });
-}
+  function Settings() {
+    E.useProxy(e.storage);
+    const set = (k, v) => { e.storage[k] = v; };
+    return React.createElement(ScrollView, null,
+      React.createElement(FormSection, { title: "Fake Badges" },
+        ...BADGES.map(b =>
+          React.createElement(FormSwitchRow, {
+            key: b.key,
+            label: b.label,
+            value: !!e.storage[b.setting],
+            onValueChange: v => set(b.setting, v),
+          })
+        )
+      ),
+      React.createElement(FormSection, { title: "Scope" },
+        React.createElement(FormSwitchRow, {
+          label: "Only on my own profile",
+          value: e.storage.onlyMe !== false,
+          onValueChange: v => set("onlyMe", v),
+        })
+      )
+    );
+  }
 
-function findRealUserStore(m) {
-    // try the tightest matcher first — getUsers + getCurrentUser only
-    // exists on the real store, never on the connection helper.
-    let candidate = null;
-    if (m.findByProps) {
-        candidate = m.findByProps("getUsers", "getCurrentUser");
-    }
-    // fall back to store name
-    if (!candidate && m.findByStoreName) {
-        candidate = m.findByStoreName("UserStore");
-    }
-    // fall back to the wide matcher — last resort
-    if (!candidate && m.findByProps) {
-        candidate = m.findByProps("getCurrentUser");
-    }
-    return candidate;
-}
+  var k = {
+    onLoad: function () {
+      // defaults
+      e.storage.onlyMe ??= true;
+      for (const b of BADGES) e.storage[b.setting] ??= true;
 
-module.exports = {
-    name: "FakeBadges",
-    description: "Client-side fake badges on your own profile",
-    authors: [{ name: "sy" }],
-
-    onLoad() {
-        console.log("[FakeBadges] onLoad fired");
-        const m = window.vendetta && window.vendetta.metro;
-        if (!m) { console.error("[FakeBadges] no vendetta.metro"); return; }
-
-        const UserStore = findRealUserStore(m);
-        if (!UserStore) { console.error("[FakeBadges] UserStore not found"); return; }
-
-        // prove which holder we got — should have getUsers AND getCurrentUser
-        console.log("[FakeBadges] UserStore has getUsers=" +
-            (typeof UserStore.getUsers === "function") +
-            " getCurrentUser=" + (typeof UserStore.getCurrentUser === "function"));
-
-        _UserStoreProto = Object.getPrototypeOf(UserStore);
-        if (!_UserStoreProto) { console.error("[FakeBadges] no prototype"); return; }
-
-        // instance method?
-        if (typeof UserStore.getCurrentUser === "function") {
-            _originalGetCurrentUser = UserStore.getCurrentUser;
-            UserStore.getCurrentUser = function () {
-                return fakeUser(_originalGetCurrentUser.apply(this, arguments));
-            };
-            console.log("[FakeBadges] hooked instance getCurrentUser");
+      // JSX injectors — give each fake id its icon + tooltip
+      R.onJsxCreate("ProfileBadge", function (_, a) {
+        if (a.props.id?.startsWith("fbd-")) {
+          const s = registry[a.props.id];
+          if (s) {
+            a.props.source = s.source;
+            a.props.label = s.label;
+            a.props.id = s.id;
+          }
         }
-        // prototype method?
-        else if (typeof _UserStoreProto.getCurrentUser === "function") {
-            _originalGetCurrentUser = _UserStoreProto.getCurrentUser;
-            _UserStoreProto.getCurrentUser = function () {
-                return fakeUser(_originalGetCurrentUser.apply(this, arguments));
-            };
-            console.log("[FakeBadges] hooked prototype getCurrentUser");
-        } else {
-            console.error("[FakeBadges] getCurrentUser nowhere — aborting");
-            return;
+      });
+      R.onJsxCreate("RenderBadge", function (_, a) {
+        if (a.props.id?.startsWith("fbd-")) {
+          const s = registry[a.props.id];
+          if (s) Object.assign(a.props, s);
         }
+      });
 
-        // optional: hook getUser for other users too
-        const ENABLE_FOR_OTHERS = false;
-        if (ENABLE_FOR_OTHERS) {
-            const getter = UserStore.getUser || _UserStoreProto.getUser;
-            if (typeof getter === "function") {
-                _originalGetUser = getter;
-                if (UserStore.getUser) {
-                    UserStore.getUser = function () {
-                        return fakeUser(_originalGetUser.apply(this, arguments));
-                    };
-                } else {
-                    _UserStoreProto.getUser = function () {
-                        return fakeUser(_originalGetUser.apply(this, arguments));
-                    };
-                }
-                console.log("[FakeBadges] hooked getUser");
-            }
+      // hook useBadges — append fake entries to the array it returns
+      patchReturn = y.after("default", useBadges, function ([props], badges) {
+        if (!props || !badges) return;
+        const userId = props.userId;
+        if (!userId) return;
+
+        if (e.storage.onlyMe !== false) {
+          let me = null;
+          try {
+            const US = B.findByProps("getUsers", "getCurrentUser");
+            me = US && US.getCurrentUser();
+          } catch (err) { return; }
+          if (!me || me.id !== userId) return;
         }
 
-        console.log("[FakeBadges] active — flags=" + FAKE_FLAGS + " premium=" + FAKE_PREMIUM);
+        BADGES.forEach(function (b, i) {
+          if (!e.storage[b.setting]) return;
+          const id = "fbd-" + b.key + "-" + i;
+          registry[id] = {
+            id: id,
+            source: { uri: CDN + b.hash + ".png" },
+            label: b.label,
+            userId: userId,
+          };
+          badges.push({ id: id, description: b.label, icon: "dummy" });
+        });
+      });
     },
 
-    onUnload() {
-        try {
-            const m = window.vendetta.metro;
-            const UserStore = findRealUserStore(m);
-            if (UserStore && typeof UserStore.getCurrentUser === "function" && _originalGetCurrentUser) {
-                UserStore.getCurrentUser = _originalGetCurrentUser;
-            }
-            if (_UserStoreProto && _originalGetCurrentUser) {
-                _UserStoreProto.getCurrentUser = _originalGetCurrentUser;
-            }
-        } catch (e) {}
-        _originalGetCurrentUser = null;
-        _originalGetUser = null;
-        _UserStoreProto = null;
-        console.log("[FakeBadges] unloaded");
+    onUnload: function () {
+      try { patchReturn?.(); } catch (e) {}
     },
-};
+
+    settings: Settings,
+  };
+
+  return h.default = k,
+         Object.defineProperty(h, "__esModule", { value: !0 }),
+         h;
+})({}, vendetta.metro, vendetta.patcher, vendetta.ui.components,
+     vendetta.plugin, vendetta.storage, vendetta.ui.assets,
+     vendetta.metro.common);
