@@ -1,0 +1,10 @@
+{
+  "name": "FakeBadges",
+  "description": "Client-side fake badges on your own profile",
+  "authors": [
+    { "name": "sy", "id": "0" }
+  ],
+  "main": "FakeBadges.js",
+  "version": "1.0.0",
+  "hash": ""
+}
