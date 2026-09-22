@@ -1,6 +1,6 @@
-// fakeBadges.js — Vendetta-compatible badge injector for Pyoncord / ShiggyCord / Bunny
-// hooks UserStore.prototype.getCurrentUser to return a clone with fake publicFlags
-// and premiumType. every render path that draws your badges routes through this.
+// fakeBadges.js — client-side badge injector for Pyoncord / ShiggyCord / Bunny.
+// writes to `flags` (not publicFlags) and `premium` — the fields the RN
+// renderer actually reads on this build.
 
 const FAKE_FLAGS =
     (1 << 0)  |  // Discord Staff
@@ -12,11 +12,27 @@ const FAKE_FLAGS =
     (1 << 17) |  // Early Verified Bot Developer
     (1 << 22);   // Active Developer
 
-const FAKE_PREMIUM_TYPE = 2;   // 0=none, 1=classic, 2=nitro, 3=basic
+const FAKE_PREMIUM = 2;   // 0=none, 1=classic, 2=nitro, 3=basic
+
+// STRIP_REAL: clear the account's real flags before OR'ing fakes in, so you
+// don't see your actual HypeSquad Balance badge mixed with the fakes.
+// set to false if you want to keep your real badges AND add fakes.
+const STRIP_REAL = true;
 
 let _originalGetCurrentUser = null;
 let _originalGetUser = null;
 let _UserStoreProto = null;
+
+function fakeUser(u) {
+    if (!u) return u;
+    const base = STRIP_REAL ? 0 : (u.flags || 0);
+    return Object.assign({}, u, {
+        flags:       base | FAKE_FLAGS,
+        publicFlags: base | FAKE_FLAGS,   // belt + suspenders — some paths read either
+        premium:     FAKE_PREMIUM,
+        premiumType: FAKE_PREMIUM,
+    });
+}
 
 module.exports = {
     name: "FakeBadges",
@@ -33,40 +49,26 @@ module.exports = {
         _UserStoreProto = Object.getPrototypeOf(UserStore);
         if (!_UserStoreProto) { console.error("[FakeBadges] no prototype on UserStore"); return; }
 
-        // ── hook getCurrentUser (your own profile) ──
+        // hook getCurrentUser — your own profile
         if (typeof _UserStoreProto.getCurrentUser === "function") {
             _originalGetCurrentUser = _UserStoreProto.getCurrentUser;
             _UserStoreProto.getCurrentUser = function () {
-                const u = _originalGetCurrentUser.apply(this, arguments);
-                if (!u) return u;
-                return Object.assign({}, u, {
-                    publicFlags: (u.publicFlags || 0) | FAKE_FLAGS,
-                    premiumType: FAKE_PREMIUM_TYPE,
-                });
+                return fakeUser(_originalGetCurrentUser.apply(this, arguments));
             };
             console.log("[FakeBadges] hooked getCurrentUser");
-        } else {
-            console.warn("[FakeBadges] getCurrentUser not on prototype");
         }
 
-        // ── hook getUser (other users' cards — optional, keeps your own identity sane) ──
-        // leave this disabled by default so it only fakes on YOUR profile.
-        // flip ENABLE_FOR_OTHERS to true if you want badges on every user card.
+        // hook getUser — optional, other users' cards
         const ENABLE_FOR_OTHERS = false;
         if (ENABLE_FOR_OTHERS && typeof _UserStoreProto.getUser === "function") {
             _originalGetUser = _UserStoreProto.getUser;
-            _UserStoreProto.getUser = function (userId) {
-                const u = _originalGetUser.apply(this, arguments);
-                if (!u) return u;
-                return Object.assign({}, u, {
-                    publicFlags: (u.publicFlags || 0) | FAKE_FLAGS,
-                    premiumType: FAKE_PREMIUM_TYPE,
-                });
+            _UserStoreProto.getUser = function () {
+                return fakeUser(_originalGetUser.apply(this, arguments));
             };
             console.log("[FakeBadges] hooked getUser (all users)");
         }
 
-        console.log("[FakeBadges] active — open your profile to see badges");
+        console.log("[FakeBadges] active — flags=" + FAKE_FLAGS + " premium=" + FAKE_PREMIUM);
     },
 
     stop() {
